@@ -1,5 +1,8 @@
 example/paper/plots/*.pdf
 example/paper/plots/*.gif
+calculate_sigma_cv/make_orig_cv.ipynb
+calculate_sigma_cv/.ipynb_checkpoints
+evstats/data
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

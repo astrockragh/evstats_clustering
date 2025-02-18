@@ -19,7 +19,8 @@ def compute_conf_ints(pdf, x, lims = [0.0013498980, 0.0227501319, 0.15865525,
     
     """
     
-    intcum = integrate.cumtrapz(pdf, x, initial=0.)
+    norm = integrate.trapz(pdf, x)
+    intcum = integrate.cumtrapz(pdf/norm, x, initial=0.)
     
     if np.squeeze(pdf).ndim > 1:
         CI = np.vstack([x[[np.max(np.where(_ic < lim)) \
