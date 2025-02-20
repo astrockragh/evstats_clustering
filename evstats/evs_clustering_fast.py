@@ -1,6 +1,6 @@
 import numpy as np
 from scipy import integrate
-from scipy.stats import norm, uniform
+from scipy.stats import norm, uniform, poisson
 from scipy.special import gammaincinv
 import hmf, h5py, astropy, sys, tqdm, time, os, warnings
 import pandas as pd
@@ -9,56 +9,69 @@ from astropy.cosmology import Planck18_arXiv_v2
 pd.options.mode.chained_assignment = None  # default='warn'
 warnings.filterwarnings("ignore", category=RuntimeWarning)
 
-out_str = 'small_OD_1e6'
-z_r = 0.003
-z_OD = 4.622
-dDEC_OD, dRA_OD = 49/3600, 191/3600 # in degrees
-dRA_survey, dDEC_survey = np.sqrt(400/3600), np.sqrt(400/3600) # in degrees
+add_sig = 0
+od = 'big'
+out_str = f'{od}_OD_fast_{add_sig}'
+recalculate_cv = False
+n_z = 15
+
+if od == 'small':
+    z_r = 0.003
+    z_OD = 4.622
+    dDEC_OD, dRA_OD = 49/3600, 191/3600 # in degrees
+    Ntrials = int(5e6)
+
+if od == 'big':
+    z_r = 0.07
+    z_OD = 3.21
+    dDEC_OD, dRA_OD = 437/3600, 609/3600 # in degrees
+    Ntrials = int(1e4)
+
+if od == 'demo':
+    z_r = 0.003
+    z_OD = 4.622
+    dDEC_OD, dRA_OD = 49/3600, 191/3600 # in degrees
+    Ntrials = int(1e3)
+
+dRA_survey, dDEC_survey = np.sqrt(160/3600), np.sqrt(160/3600) # in degrees
 z_min_survey, z_max_survey = 3, 5
 z_min_survey = float(z_min_survey)
 z_max_survey = float(z_max_survey)
 
 # calculate cosmic variance
-recalculate_cv = False
 df_loc_precomputed = f'dfs/scaled_{z_OD}_{z_r}.csv'
 
 # computational parameters
 low_z = z_min_survey 
-max_z = 15
-n_z = 10
-Ntrials = int(1e6) # number of overdensities to sample, make sure that this is larger than the number of overdensities that fit in your survey volume
+max_z = 18
 
 # define basic parameters
 cosmo = Planck18_arXiv_v2
 all_sky = 41252.96125 #number of square degrees in the sky
 f = np.pi/180 # change between degrees and radians
-little_h = 0.68 
 baryon_frac = 0.16
 
 mmin = 3 # Minimum halo mass for HMF
 mmax = 15 # Maximum halo mass for HMF
 
 maxMass = 12.5
-dM = 0.5
+dM = 0.5 #clustering scale
 dlog10m = 0.01 #numerical HMF resolution, should be <<mass resolution
-Ndm = int(0.5//dlog10m) #number of steps in a 0.5 dex mass interval
-Nm = 50 #mass evaluation grid resolution
+Ndm = int(dM//dlog10m) #number of steps in a dM dex mass interval
+Nm = 100 #mass evaluation grid resolution, set so that we get dM/Nm = 0.005
 mbins = np.arange(7., maxMass+dM/Nm-1e-10, dM/Nm)
 mbins = np.round(mbins, 3)
-# print(mbins)
 
 # Method to take trials from the inverse CDF
 # of a gamma distribution with a given variance and mean
-def trial_minsig(sig_v, mean, Ntrials=10000):
-    Ntrials = int(Ntrials)
+def trial_OD(x, sig_v, mean):
     var = sig_v**2*mean**2+mean #cv + poisson
     k = mean**2/var
     t = var/mean
-    x = np.linspace(1/Ntrials, 1-1/Ntrials, Ntrials)
-    rand = t*gammaincinv(k, x, out = None) # this is only accurate when sigma_CV>0.05
+    rand = t*gammaincinv(k, x, out = None) # this is only accurate when sigma_CV*N>0.05
     return rand
 
-def sigma_delta_evs(z_r, z_OD, dDEC_OD, dRA_OD, z_min_survey, z_max_survey, dRA_survey, dDEC_survey, n_samp = int(1e5)):
+def sigma_delta_evs(z_r, z_OD, dDEC_OD, dRA_OD, z_min_survey, z_max_survey, dRA_survey, dDEC_survey, n_samp = int(1e5), add_sig = 0.0):
     ''' All DEC/RA's should be given in degrees'''
     d1 = dDEC_OD*f*cosmo.comoving_distance(z_OD)
     d2 = dRA_OD*f*cosmo.comoving_transverse_distance(z_OD)
@@ -71,15 +84,19 @@ def sigma_delta_evs(z_r, z_OD, dDEC_OD, dRA_OD, z_min_survey, z_max_survey, dRA_
     d2 = dRA_survey*f*cosmo.comoving_transverse_distance(z_av)
     dz = cosmo.comoving_distance(z_max_survey)-cosmo.comoving_distance(z_min_survey)
 
-    V_survey = ( cosmo.comoving_volume(z_max_survey) - cosmo.comoving_volume(z_min_survey) )*(dRA_survey*dDEC_survey/all_sky)/(1+z_av)**3
-
-    # V_survey = d1*d2*dz
+    V_survey = d1*d2*dz/(1+z_min_survey)**3
     N = V_survey/V_OD
+    sig = norm.isf(1/N)
+    if add_sig:
+        N = 1/(1-norm.cdf(sig+add_sig))
+        sig = norm.isf(1/N)
+    
+    print(N, V_OD, V_survey, sig)
     x = np.linspace(1/n_samp, 1-1/n_samp, n_samp)
     evs = N*uniform.pdf(x)*pow(uniform.cdf(x), N - 1.)
-    return evs, x, V_OD, V_survey
+    return evs, x, V_OD*(1+z_OD)**3, V_survey*(1+z_min_survey)**3
 
-def evs_clustering(cv_df, mf = hmf.MassFunction(), V = 1, z = 4, Ntrials = int(1e5)):
+def evs_clustering(cv_df, x, mf = hmf.MassFunction(hmf_model="Behroozi"), V = 1, z = 4):
     """
 
     Parameters
@@ -92,9 +109,11 @@ def evs_clustering(cv_df, mf = hmf.MassFunction(), V = 1, z = 4, Ntrials = int(1
     """
     
     mf.update(z = z, Mmin = mmin, Mmax = mmax, dlog10m = dlog10m)
-    dndm = mf.dndlog10m/little_h**4*V.value
-    mass = mf.m*little_h
-    sbf = 0.03856609803835385 + 0.012162496006188494 * (z - 4) # could possibly include some uncertainty here
+    mf.cosmo_model = Planck18_arXiv_v2
+
+    dndm = mf.dndlog10m*V.value
+    mass = mf.m
+    sbf = 0.1 + 0.02 * (z - 4) # could possibly include some uncertainty here
     stellar_mass = mass * sbf * baryon_frac 
 
     N_trapz = []
@@ -120,8 +139,8 @@ def evs_clustering(cv_df, mf = hmf.MassFunction(), V = 1, z = 4, Ntrials = int(1
     for m in mbins[:-1]:
         arg = np.argmin(np.abs(np.log10(stellar_mass)-m))
         N = N_trapz[arg-1]
-        cv = cv_df_z[str(m)]
-        smfs.append(trial_minsig(float(cv), N, Ntrials = Ntrials))
+        cv = cv_df_z[str(m)]/3
+        smfs.append(trial_OD(x, float(cv), N))
     
     smfs = np.vstack(smfs)*f
     Ns = np.sum(smfs, axis = 0)
@@ -162,7 +181,7 @@ if __name__ == '__main__':
 
     zs = np.array(cv_df['z'])
     evs_OD, x_OD, V_OD, V_survey = sigma_delta_evs(z_r, z_OD, dDEC_OD, dRA_OD, \
-                                                z_min_survey, z_max_survey, dRA_survey, dDEC_survey, n_samp = Ntrials)
+        z_min_survey, z_max_survey, dRA_survey, dDEC_survey, n_samp = Ntrials, add_sig = add_sig)
 
     phi_max_convolved_z = []
     phi_maxs_z = []
@@ -170,9 +189,13 @@ if __name__ == '__main__':
     smfs_z = []
     mbins_z = []
     N_trapz_z = []
+    mask0 = evs_OD>1e-4
+    evs_OD = evs_OD[mask0]
+    x_OD = x_OD[mask0]
+    print(zs)
     f_z = []
     for z in tqdm.tqdm(zs, total = len(zs)):
-        pm, smfs, mbins, N_trapz, f = evs_clustering(cv_df = cv_df, V = V_OD, z = z, Ntrials = Ntrials)
+        pm, smfs, mbins, N_trapz, f = evs_clustering(cv_df, x_OD, V = V_OD, z = z)
         mask = ~np.any(np.isnan(pm), axis = 0)
         evs_ODm = evs_OD[mask]
         pdf_norm = np.sum(pm[:,mask]*evs_ODm, axis = 1)/np.sum(evs_ODm)
@@ -189,10 +212,9 @@ if __name__ == '__main__':
     with h5py.File('data/'+out_str+'.h5', 'w') as hf:
         hf.create_dataset('log10m', data = mbins)
         hf.create_dataset('z', data = zs)
-        # hf.create_dataset('smf', data = np.array(smfs_z, dtype = np.float32))
+        hf.create_dataset('smf', data = np.array(smfs_z, dtype = np.float32))
         hf.create_dataset('phi_max_conv', data = phi_max_convolved_z)
         hf.create_dataset('phi_maxs', data = np.array(phi_maxs_z, dtype = np.float32))
         hf.create_dataset('evs_OD', data = evs_OD)
-        hf.create_dataset('f', data = f)
+        hf.create_dataset('f', data = [f])
         hf.create_dataset('N_trapz', data = N_trapz_z)
-
