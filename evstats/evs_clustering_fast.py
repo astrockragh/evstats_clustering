@@ -9,41 +9,57 @@ from astropy.cosmology import Planck18_arXiv_v2
 pd.options.mode.chained_assignment = None  # default='warn'
 warnings.filterwarnings("ignore", category=RuntimeWarning)
 
-add_sig = 0
-od = 'big'
-out_str = f'{od}_OD_fast_{add_sig}'
-recalculate_cv = False
-n_z = 15
+add_sig = 0 #do you think that this field is additionally overdense? Set 0 for assuming that the field is average
+od = 'highz_small' #which overdensity are we calculating this for?
+out_str = f'{od}_OD_fast_{add_sig}_highsbf' # where to save this, as data/<out_str>.h5
+recalculate_cv = False # should we recalculate the clustering strength?
+OD_geometry = 'ellipsoid' ##options are 'ellipsoid', 'cylinder', and 'square'. Note that all distances are supposed to be radii 
 
-if od == 'small':
-    z_r = 0.003
+if od == 'highz_small':
+    z_r = 0.0056
     z_OD = 4.622
-    dDEC_OD, dRA_OD = 49/3600, 191/3600 # in degrees
-    Ntrials = int(5e6)
+    dDEC_OD, dRA_OD = 6/3600, 130.6/3600 # in degrees
+    Ntrials = int(1e7)
 
-if od == 'big':
-    z_r = 0.07
+if od == 'highz_big':
+    z_r = 0.014
+    z_OD = 4.622
+    dDEC_OD, dRA_OD = 16.5/3600, 592/3600 # in degrees
+    Ntrials = int(2.5e6)
+
+if od == 'lowz_small':
+    z_r = 0.073
     z_OD = 3.21
-    dDEC_OD, dRA_OD = 437/3600, 609/3600 # in degrees
+    dDEC_OD, dRA_OD = 59.8/3600, 374.1/3600 # in degrees
     Ntrials = int(1e4)
 
-if od == 'demo':
-    z_r = 0.003
-    z_OD = 4.622
-    dDEC_OD, dRA_OD = 49/3600, 191/3600 # in degrees
-    Ntrials = int(1e3)
+if od == 'lowz_big':
+    z_r = 0.136 
+    z_OD = 3.21
+    dDEC_OD, dRA_OD = 177.8/3600, 741/3600 # in degrees
+    Ntrials = int(3e3)
 
-dRA_survey, dDEC_survey = np.sqrt(160/3600), np.sqrt(160/3600) # in degrees
+if od == 'test':
+    z_r = 1/1.2 
+    z_OD = 4
+    dDEC_OD, dRA_OD = 1402/3600, 844.6/3600# in degrees
+    Ntrials = int(1e2)
+
+# dRA_survey, dDEC_survey = np.sqrt(160/3600), np.sqrt(160/3600) # in degrees
+dRA_survey, dDEC_survey = 1402/3600, 844.6/3600 # in degrees
 z_min_survey, z_max_survey = 3, 5
 z_min_survey = float(z_min_survey)
 z_max_survey = float(z_max_survey)
 
-# calculate cosmic variance
-df_loc_precomputed = f'dfs/scaled_{z_OD}_{z_r}.csv'
-
-# computational parameters
+# Additional parameters for computing the cosmic variance
+n_z = 15
 low_z = z_min_survey 
 max_z = 18
+
+if not recalculate_cv:
+    # file with pre-computed cosmic variance
+    df_loc_precomputed = f'dfs/scaled_{z_OD}_{z_r}.csv'
+    # df_loc_precomputed = f'dfs/scaled_4.622_0.003.csv'
 
 # define basic parameters
 cosmo = Planck18_arXiv_v2
@@ -68,16 +84,22 @@ def trial_OD(x, sig_v, mean):
     var = sig_v**2*mean**2+mean #cv + poisson
     k = mean**2/var
     t = var/mean
-    rand = t*gammaincinv(k, x, out = None) # this is only accurate when sigma_CV*N>0.05
+    rand = t*gammaincinv(k, x, out = None) # this is only accurate when sigma_CV*N>0.05, which is usually the case for these overdensities
     return rand
 
-def sigma_delta_evs(z_r, z_OD, dDEC_OD, dRA_OD, z_min_survey, z_max_survey, dRA_survey, dDEC_survey, n_samp = int(1e5), add_sig = 0.0):
+def sigma_delta_evs(z_r, z_OD, dDEC_OD, dRA_OD, z_min_survey, z_max_survey, dRA_survey, dDEC_survey, geometry = 'ellipsoid', n_samp = None, add_sig = 0.0):
     ''' All DEC/RA's should be given in degrees'''
+
     d1 = dDEC_OD*f*cosmo.comoving_distance(z_OD)
     d2 = dRA_OD*f*cosmo.comoving_transverse_distance(z_OD)
-    dz = cosmo.comoving_distance(z_OD+z_r)-cosmo.comoving_distance(z_OD-z_r)
-
-    V_OD = 4/3*np.pi*d1*d2*dz/8/(1+z_OD)**3
+    dz = cosmo.comoving_distance(z_OD+z_r/2)-cosmo.comoving_distance(z_OD-z_r/2)
+    if geometry == 'ellipsoid':
+        V_OD = 4/3*np.pi*d1*d2*dz/(1+z_OD)**3
+    if geometry == 'cylinder':
+        base = np.pi*d1*d2
+        V_OD = base*dz/(1+z_OD)**3
+    if geometry == 'rectangle':
+        V_OD = dz*d1*d2*8/(1+z_OD)**3
 
     z_av = (z_min_survey+z_max_survey)/2
     d1 = dDEC_survey*f*cosmo.comoving_distance(z_av)
@@ -92,7 +114,11 @@ def sigma_delta_evs(z_r, z_OD, dDEC_OD, dRA_OD, z_min_survey, z_max_survey, dRA_
         sig = norm.isf(1/N)
     
     print(N, V_OD, V_survey, sig)
-    x = np.linspace(1/n_samp, 1-1/n_samp, n_samp)
+    if n_samp:
+        x = np.linspace(1/(2*n_samp), 1, n_samp)
+    else:
+        x = np.linspace(100/N, 1, 100/N)
+
     evs = N*uniform.pdf(x)*pow(uniform.cdf(x), N - 1.)
     return evs, x, V_OD*(1+z_OD)**3, V_survey*(1+z_min_survey)**3
 
@@ -114,6 +140,8 @@ def evs_clustering(cv_df, x, mf = hmf.MassFunction(hmf_model="Behroozi"), V = 1,
     dndm = mf.dndlog10m*V.value
     mass = mf.m
     sbf = 0.1 + 0.02 * (z - 4) # could possibly include some uncertainty here
+    sbf = 0.15 + 0.03 * (z - 4)
+
     stellar_mass = mass * sbf * baryon_frac 
 
     N_trapz = []
@@ -139,7 +167,7 @@ def evs_clustering(cv_df, x, mf = hmf.MassFunction(hmf_model="Behroozi"), V = 1,
     for m in mbins[:-1]:
         arg = np.argmin(np.abs(np.log10(stellar_mass)-m))
         N = N_trapz[arg-1]
-        cv = cv_df_z[str(m)]/3
+        cv = cv_df_z[str(m)]
         smfs.append(trial_OD(x, float(cv), N))
     
     smfs = np.vstack(smfs)*f
@@ -189,7 +217,7 @@ if __name__ == '__main__':
     smfs_z = []
     mbins_z = []
     N_trapz_z = []
-    mask0 = evs_OD>1e-4
+    mask0 = evs_OD>1e-4 # speed up the calculation
     evs_OD = evs_OD[mask0]
     x_OD = x_OD[mask0]
     print(zs)
