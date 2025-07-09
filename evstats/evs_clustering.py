@@ -9,7 +9,7 @@ from astropy.cosmology import Planck18_arXiv_v2
 pd.options.mode.chained_assignment = None  # default='warn'
 warnings.filterwarnings("ignore", category=RuntimeWarning)
 
-out_str = 'small_OD_1e6'
+out_str = 'demo2'
 z_r = 0.003
 z_OD = 4.622
 dDEC_OD, dRA_OD = 49/3600, 191/3600 # in degrees
@@ -25,7 +25,7 @@ df_loc_precomputed = f'dfs/scaled_{z_OD}_{z_r}.csv'
 # computational parameters
 low_z = z_min_survey 
 max_z = 15
-n_z = 10
+n_z = 2
 Ntrials = int(1e6) # number of overdensities to sample, make sure that this is larger than the number of overdensities that fit in your survey volume
 
 # define basic parameters

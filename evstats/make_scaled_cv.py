@@ -1,8 +1,8 @@
 import numpy as np
 import pandas as pd
-from astropy.cosmology import Planck18_arXiv_v2
-cosmo = Planck18_arXiv_v2
+from astropy.cosmology import Planck18 as cosmo
 import cosmic_variance as cv
+from tqdm import tqdm
 # Generate the values of z for bins of fixed comoving distance
 
 def scale_cv( side1, side2, z_OD, z_r, low_z = 3, max_z = 15, n_z = 10):
@@ -38,10 +38,10 @@ def scale_cv( side1, side2, z_OD, z_r, low_z = 3, max_z = 15, n_z = 10):
     #If you want to use a different cosmology, you can specify it by the following in the get_cv call
     # OmegaM = 0.308, OmegaL = 0.692, OmegaBaryon = 0.022/(0.678)**2 sigma8 = 0.82, ns = 0.96, h = 0.678
 
-    print(f'Calculating the cosmic variance, estimated time is {(len(low_zs)*240)//60:.2f} minutes')
+    print(f'Calculating the cosmic variance, estimated (very uncertain) time is {(len(low_zs)*240)//60:.2f} minutes')
     ## array to save cv values to scale the base_cv
     cv_scales = []
-    for l, h in zip(low_zs, high_zs):
+    for  l, h in tqdm(zip(low_zs, high_zs), total = len(low_zs)):
         cv_scale = cv.get_cv(side1, side2, np.array([l, h]), name = None, acc=acc, verbose = verbose)
         cv_scales.append(cv_scale)
 

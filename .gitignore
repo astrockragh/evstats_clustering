@@ -5,8 +5,8 @@ calculate_sigma_cv/.ipynb_checkpoints
 # evstats/data/test25_3e5.h5
 # evstats/data/test50.h5
 # evstats/data/test50_3e5.h5
-evstats/data/*.h5
-
+evstats/data/*
+example/data/*
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
